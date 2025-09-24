@@ -1,0 +1,342 @@
+import { useState, useEffect } from 'react';
+import { useParams } from 'react-router-dom';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import {
+  Box,
+  Grid,
+  Typography,
+  Button,
+  Checkbox,
+  CircularProgress,
+  Paper,
+  IconButton,
+  Tooltip,
+  useTheme,
+  Theme,
+  SxProps,
+} from '@mui/material';
+import {
+  Print as PrintIcon,
+  CheckCircle as CheckCircleIcon,
+  Refresh as RefreshIcon,
+  SelectAll as SelectAllIcon,
+  Deselect as DeselectIcon,
+  HourglassEmpty as HourglassEmptyIcon,
+} from '@mui/icons-material';
+import { 
+  fetchPhotosByEvent, 
+  printPhoto, 
+  markAsPrinted, 
+  batchUpdateStatus,
+  type Photo 
+} from '../services/api';
+
+const PhotoGallery = (): JSX.Element => {
+  const { eventId } = useParams<{ eventId?: string }>();
+  const theme = useTheme();
+  const queryClient = useQueryClient();
+  
+  const [selected, setSelected] = useState<string[]>([]);
+  const [selectMode, setSelectMode] = useState(false);
+
+  // Fetch photos from API
+  const { data: photos = [], isLoading, refetch } = useQuery({
+    queryKey: ['photos', eventId],
+    queryFn: () => fetchPhotosByEvent(eventId, 'pending'),
+    enabled: !!eventId,
+  });
+
+  const printMutation = useMutation({
+    mutationFn: printPhoto,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['photos', eventId] });
+    },
+  });
+
+  const markAsPrintedMutation = useMutation({
+    mutationFn: (photoId: string) => markAsPrinted(photoId).then(() => ({ photoId })),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['photos', eventId] });
+    },
+  });
+
+  const batchUpdateStatusMutation = useMutation({
+    mutationFn: ({ ids, status }: { ids: string[]; status: 'printed' | 'pending' }) => 
+      batchUpdateStatus(ids, status),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['photos', eventId] });
+      setSelected([]);
+      setSelectMode(false);
+    },
+  });
+
+  const handleSelect = (id: string) => {
+    setSelected(prev => 
+      prev.includes(id) 
+        ? prev.filter(photoId => photoId !== id)
+        : [...prev, id]
+    );
+  };
+
+  const handlePrintSelected = async () => {
+    if (selected.length === 0) return;
+    
+    try {
+      await Promise.all(selected.map(id => printMutation.mutateAsync(id)));
+      await batchUpdateStatusMutation.mutateAsync({ 
+        ids: selected, 
+        status: 'printed' 
+      });
+    } catch (error) {
+      console.error('Error printing photos:', error);
+    }
+  };
+
+  const handleMarkAsPrinted = async (photo: Photo) => {
+    try {
+      await markAsPrintedMutation.mutateAsync(photo._id);
+    } catch (error) {
+      console.error('Error marking as printed:', error);
+    }
+  };
+
+  // Reset selection when changing events
+  useEffect(() => {
+    setSelected([]);
+    setSelectMode(false);
+    if (eventId) {
+      refetch();
+    }
+  }, [eventId, refetch]);
+
+  if (isLoading) {
+    return (
+      <Box display="flex" justifyContent="center" alignItems="center" minHeight="200px">
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  if (!eventId) {
+    return (
+      <Box p={3} textAlign="center">
+        <Typography variant="h6">No event selected</Typography>
+      </Box>
+    );
+  }
+
+  if (photos.length === 0) {
+    return (
+      <Box p={3} textAlign="center">
+        <Typography variant="h6">No photos found for this event</Typography>
+        <Button 
+          startIcon={<RefreshIcon />} 
+          onClick={() => refetch()}
+          sx={{ mt: 2 }}
+        >
+          Refresh
+        </Button>
+      </Box>
+    );
+  }
+
+  // Styles
+  const headerSx: SxProps = {
+    p: 2,
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: theme.palette.background.paper,
+    borderBottom: `1px solid ${theme.palette.divider}`,
+  };
+
+  const buttonSx: SxProps = {
+    ml: 1,
+  };
+
+  const getPaperSx = (photo: Photo): SxProps => ({
+    position: 'relative',
+    overflow: 'hidden',
+    cursor: 'pointer',
+    transition: 'transform 0.2s, box-shadow 0.2s',
+    '&:hover': {
+      transform: 'scale(1.02)',
+      boxShadow: theme.shadows[4],
+    },
+    outline: selectMode && selected.includes(photo._id) 
+      ? `3px solid ${theme.palette.primary.main}` 
+      : 'none',
+  });
+
+  const checkboxSx: SxProps = {
+    position: 'absolute',
+    top: 8,
+    left: 8,
+    zIndex: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+    '&:hover': {
+      backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    },
+  };
+
+  const imageSx: SxProps = {
+    width: '100%',
+    height: 'auto',
+    display: 'block',
+  };
+
+  const infoBoxSx: SxProps = {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    p: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    color: 'white',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  };
+
+  const actionBoxSx: SxProps = {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 1,
+    opacity: 0,
+    transition: 'opacity 0.2s',
+    'div:hover &': {
+      opacity: 1,
+    },
+  };
+
+  const iconButtonSx: SxProps = {
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    '&:hover': {
+      backgroundColor: 'white',
+    },
+  };
+
+  return (
+    <Box>
+      <Box sx={headerSx}>
+        <Box>
+          <Typography variant="h6">
+            {selectMode ? `${selected.length} selected` : 'Photo Gallery'}
+          </Typography>
+          {selectMode && (
+            <Typography variant="body2" color="textSecondary">
+              Select photos to print or mark as printed
+            </Typography>
+          )}
+        </Box>
+        
+        <Box>
+          {selectMode ? (
+            <>
+              <Button
+                variant="contained"
+                color="primary"
+                startIcon={<PrintIcon />}
+                onClick={handlePrintSelected}
+                disabled={selected.length === 0}
+                sx={buttonSx}
+              >
+                Print Selected ({selected.length})
+              </Button>
+              <Button
+                variant="outlined"
+                onClick={() => setSelectMode(false)}
+                sx={buttonSx}
+              >
+                Cancel
+              </Button>
+            </>
+          ) : (
+            <Button
+              variant="outlined"
+              startIcon={<SelectAllIcon />}
+              onClick={() => setSelectMode(true)}
+              sx={buttonSx}
+            >
+              Select Photos
+            </Button>
+          )}
+          
+          <Tooltip title="Refresh">
+            <IconButton onClick={() => refetch()} sx={buttonSx}>
+              <RefreshIcon />
+            </IconButton>
+          </Tooltip>
+        </Box>
+      </Box>
+
+      <Grid container spacing={2} p={2}>
+        {photos.map((photo) => (
+          <Grid item xs={12} sm={6} md={4} lg={3} key={photo._id}>
+            <Paper sx={getPaperSx(photo)}>
+              {selectMode && (
+                <Checkbox
+                  checked={selected.includes(photo._id)}
+                  onChange={() => handleSelect(photo._id)}
+                  sx={checkboxSx}
+                />
+              )}
+              <img
+                src={photo.imageData}
+                alt={`Photo ${photo._id}`}
+                style={imageSx}
+              />
+              <Box sx={infoBoxSx}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Typography variant="caption" noWrap>
+                    {new Date(photo.createdAt).toLocaleString()}
+                  </Typography>
+                  {photo.printStatus === 'printed' ? (
+                    <CheckCircleIcon color="success" fontSize="small" />
+                  ) : (
+                    <HourglassEmptyIcon color="warning" fontSize="small" />
+                  )}
+                </Box>
+              </Box>
+              {!selectMode && (
+                <Box sx={actionBoxSx}>
+                  <Tooltip title="Mark as printed">
+                    <IconButton
+                      size="small"
+                      color="primary"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void handleMarkAsPrinted(photo);
+                      }}
+                      sx={iconButtonSx}
+                    >
+                      <CheckCircleIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                  <Tooltip title="Print">
+                    <IconButton
+                      size="small"
+                      color="primary"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void printMutation.mutateAsync(photo._id);
+                      }}
+                      sx={iconButtonSx}
+                    >
+                      <PrintIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                </Box>
+              )}
+            </Paper>
+          </Grid>
+        ))}
+      </Grid>
+    </Box>
+  );
+};
+
+export default PhotoGallery;
