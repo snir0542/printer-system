@@ -17,9 +17,10 @@ import {
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import { useQuery } from '@tanstack/react-query';
-import { getPrinters, testPrinter } from '../services/api';
+import { getPrinters, testPrinter, startServerPolling, stopServerPolling } from '../services/api';
 import { AxiosError } from 'axios';
 import { useI18n } from '../i18n/I18nProvider';
+import { useSnackbar } from 'notistack';
 
 interface EventSearchProps {
   onClose?: () => void;
@@ -31,6 +32,7 @@ export default function EventSearch({ onClose }: EventSearchProps) {
   const status = useAppSelector(selectStatus);
   const navigate = useNavigate();
   const { t } = useI18n();
+  const { enqueueSnackbar } = useSnackbar();
 
   const { data: printersResponse } = useQuery({
     queryKey: ['printers'],
@@ -61,6 +63,28 @@ export default function EventSearch({ onClose }: EventSearchProps) {
     }
   };
 
+  const handleStartPolling = async (): Promise<void> => {
+    if (!eventId) {
+      enqueueSnackbar(t('polling.missingEvent'), { variant: 'warning' });
+      return;
+    }
+    try {
+      await startServerPolling(eventId);
+      enqueueSnackbar(`${t('polling.started')} ${eventId}`, { variant: 'success' });
+    } catch (error) {
+      enqueueSnackbar((error as Error).message || 'Failed to start polling', { variant: 'error' });
+    }
+  };
+
+  const handleStopPolling = async (): Promise<void> => {
+    try {
+      await stopServerPolling();
+      enqueueSnackbar(t('polling.stopped'), { variant: 'info' });
+    } catch (error) {
+      enqueueSnackbar((error as Error).message || 'Failed to stop polling', { variant: 'error' });
+    }
+  };
+
   const handleStatusChange = (event: SelectChangeEvent) => {
     const newStatus = event.target.value as 'all' | 'pending' | 'printed';
     dispatch(setStatus(newStatus));
@@ -70,13 +94,13 @@ export default function EventSearch({ onClose }: EventSearchProps) {
     try {
       const result = await testPrinter();
       if (result.success) {
-        console.log('Test print successful');
+        enqueueSnackbar(result.message || 'Test print started successfully', { variant: 'success' });
       } else {
-        console.error('Test print failed:', result.message);
+        enqueueSnackbar(result.message || 'Test print failed', { variant: 'error' });
       }
     } catch (error) {
       const axiosError = error as AxiosError<{ message?: string }>;
-      console.error('Test print failed:', axiosError.response?.data?.message || axiosError.message);
+      enqueueSnackbar(axiosError.response?.data?.message || axiosError.message || 'Test print failed', { variant: 'error' });
     }
   };
 
@@ -127,6 +151,15 @@ export default function EventSearch({ onClose }: EventSearchProps) {
       </Box>
 
       <Divider sx={{ my: 2 }} />
+
+      <Box display="flex" gap={1} mb={2}>
+        <Button variant="outlined" color="primary" onClick={handleStartPolling} fullWidth>
+          {t('polling.start')}
+        </Button>
+        <Button variant="outlined" color="secondary" onClick={handleStopPolling} fullWidth>
+          {t('polling.stop')}
+        </Button>
+      </Box>
 
       <Typography variant="subtitle2" gutterBottom>
         {t('printer.statusTitle')}

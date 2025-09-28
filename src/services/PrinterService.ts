@@ -5,6 +5,7 @@ import path from 'path';
 import os from 'os';
 import { Photo, PrinterConfig } from '../types';
 import { logger } from '../utils/logger';
+import axios from 'axios';
 
 // Extended interface for the test print
 interface TestPhoto extends Omit<Photo, 'originalUrl'> {
@@ -52,9 +53,20 @@ export class PrinterService {
     const tempFilePath = path.join(this.tempDir, `${Date.now()}_${photo._id}.jpg`);
     
     try {
-      // Convert base64 to image file
-      const base64Data = photo.imageData.replace(/^data:image\/[a-z]+;base64,/, '');
-      const buffer = Buffer.from(base64Data, 'base64');
+      // Handle both base64 data URLs and remote URLs
+      let buffer: Buffer;
+      if (photo.imageData.startsWith('data:image/')) {
+        // Base64 data URL
+        const base64Data = photo.imageData.replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, '');
+        buffer = Buffer.from(base64Data, 'base64');
+      } else if (photo.imageData.startsWith('http://') || photo.imageData.startsWith('https://')) {
+        // Remote URL - download image
+        const response = await axios.get<ArrayBuffer>(photo.imageData, { responseType: 'arraybuffer' });
+        buffer = Buffer.from(response.data);
+      } else {
+        throw new Error('Unsupported imageData format. Expected base64 data URL or http(s) URL.');
+      }
+
       await fs.writeFile(tempFilePath, buffer);
       logger.debug(`Created temp file for printing: ${tempFilePath}`);
 
@@ -108,11 +120,13 @@ export class PrinterService {
 
     try {
       switch (this.platform) {
-        case 'win32':
-          // Windows - using mspaint to print
-          command = 'mspaint';
+        case 'win32': {
+          // Windows: Prefer mspaint if available; fallback to PowerShell printing
+          // Try mspaint first
+          command = 'C:\\Windows\\System32\\mspaint.exe';
           args = ['/p', filePath];
           break;
+        }
         case 'darwin':
         case 'linux':
           // macOS/Linux - using lpr to print
@@ -129,21 +143,49 @@ export class PrinterService {
 
       logger.debug(`Printing with command: ${command} ${args.join(' ')}`);
       
-      await new Promise<void>((resolve, reject) => {
-        const child = spawn(command, args, { stdio: 'ignore' });
-        
-        child.on('close', (code) => {
-          if (code === 0) {
-            resolve();
-          } else {
-            reject(new Error(`Print command failed with code ${code}`));
-          }
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const child = spawn(command, args, { stdio: 'ignore' });
+          
+          child.on('close', (code) => {
+            if (code === 0) {
+              resolve();
+            } else {
+              reject(new Error(`Print command failed with code ${code}`));
+            }
+          });
+          
+          child.on('error', (error) => {
+            reject(new Error(`Print command failed to start: ${error.message}`));
+          });
         });
-        
-        child.on('error', (error) => {
-          reject(new Error(`Print command failed to start: ${error.message}`));
-        });
-      });
+      } catch (err) {
+        // If on Windows and mspaint failed to spawn, fallback to PowerShell printing
+        if (this.platform === 'win32') {
+          logger.warn('mspaint not available or failed; falling back to PowerShell printing');
+          await new Promise<void>((resolve, reject) => {
+            const psCommand = 'powershell';
+            const psArgs = [
+              '-NoProfile',
+              '-Command',
+              `Start-Process -FilePath \"${filePath.replace(/\\/g, '/') }\" -Verb Print`
+            ];
+            const child = spawn(psCommand, psArgs, { stdio: 'ignore' });
+            child.on('close', (code) => {
+              if (code === 0) {
+                resolve();
+              } else {
+                reject(new Error(`PowerShell print failed with code ${code}`));
+              }
+            });
+            child.on('error', (error) => {
+              reject(new Error(`PowerShell print failed to start: ${error.message}`));
+            });
+          });
+        } else {
+          throw err;
+        }
+      }
 
     } catch (error) {
       logger.error(`Failed to print file ${filePath}:`, error);
@@ -192,6 +234,11 @@ export class PrinterService {
    */
   async testPrinter(): Promise<PrintResult> {
     const testImagePath = path.join(__dirname, '..', 'assets', 'test-print.jpg');
+    const simulate = process.env.PRINTER_TEST_MODE === 'simulate' || process.env.NODE_ENV === 'development';
+    if (simulate) {
+      logger.info('PRINTER_TEST_MODE enabled, simulating test print.');
+      return { success: true, message: 'Test print simulated successfully' };
+    }
     
     try {
       // Try to use the test image if it exists

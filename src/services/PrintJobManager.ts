@@ -15,12 +15,15 @@ export class PrintJobManager {
     this.printerService = printerService;
   }
 
-  async startPolling(eventId?: string, intervalMs: number = 5000): Promise<void> {
+  async startPolling(eventId: string, intervalMs: number = 5000): Promise<void> {
+    if (!eventId) {
+      throw new Error('Event ID is required to start polling');
+    }
     if (this.pollInterval) {
       clearInterval(this.pollInterval);
     }
 
-    logger.info(`Starting photo polling for event ${eventId || 'all events'} every ${intervalMs}ms`);
+    logger.info(`Starting photo polling for event ${eventId} every ${intervalMs}ms`);
     
     // Initial fetch
     await this.fetchAndQueuePhotos(eventId);
@@ -46,7 +49,6 @@ export class PrintJobManager {
 
   private async fetchAndQueuePhotos(eventId?: string, batchSize: number = 5): Promise<void> {
     try {
-      console.log("event id", eventId);
       // Only fetch pending photos for the print queue
       const response: PendingPhotosResponse = await this.apiService.getPendingPhotos(eventId, 'pending', batchSize);
       

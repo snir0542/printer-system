@@ -105,9 +105,10 @@ app.post('/print/test', async (req, res) => {
   try {
     const result = await printerService.testPrinter();
     if (result.success) {
-      res.json({ message: result.message });
+      res.json({ success: true, message: result.message });
     } else {
       res.status(500).json({ 
+        success: false,
         error: 'Test print failed',
         message: result.message 
       });
@@ -115,6 +116,7 @@ app.post('/print/test', async (req, res) => {
   } catch (error) {
     logger.error('Test print failed:', error);
     res.status(500).json({ 
+      success: false,
       error: 'Test print failed',
       message: error instanceof Error ? error.message : 'Unknown error'
     });
@@ -147,15 +149,27 @@ app.post('/queue/clear', async (req, res) => {
   }
 });
 
-app.post('/polling/start', (req, res) => {
-  const eventId = req.body.eventId as string | undefined;
-  const interval = parseInt(req.body.interval as string) || parseInt(process.env.POLL_INTERVAL_MS || '5000');
-  printJobManager.startPolling(eventId, interval);
-  res.json({ 
-    message: `Polling started for ${eventId || 'all events'}`,
-    eventId,
-    interval: `${interval}ms`
-  });
+app.post('/polling/start', async (req, res) => {
+  try {
+    const eventId = req.body?.eventId as string | undefined;
+    const interval = parseInt(req.body?.interval as string) || parseInt(process.env.POLL_INTERVAL_MS || '5000');
+
+    if (!eventId) {
+      return res.status(400).json({
+        error: 'Event ID is required to start polling',
+      });
+    }
+
+    await printJobManager.startPolling(eventId, interval);
+    res.json({ 
+      message: `Polling started for ${eventId}`,
+      eventId,
+      interval: `${interval}ms`
+    });
+  } catch (error) {
+    logger.error('Failed to start polling:', error);
+    res.status(500).json({ error: 'Failed to start polling' });
+  }
 });
 
 app.post('/polling/stop', (req, res) => {
@@ -183,12 +197,14 @@ app.listen(PORT, () => {
   logger.info(`Printer: ${printerConfig.name}`);
   logger.info(`API Base URL: ${process.env.API_BASE_URL || 'http://localhost:5000/api'}`);
   
-  // Start automatic polling if enabled
-  if (process.env.AUTO_START_POLLING !== 'false') {
-    const eventId = process.env.EVENT_ID;
+  // Start automatic polling only when explicitly enabled and EVENT_ID is provided
+  if (process.env.AUTO_START_POLLING === 'true' && process.env.EVENT_ID) {
+    const eventId = process.env.EVENT_ID as string;
     const pollInterval = parseInt(process.env.POLL_INTERVAL_MS || '5000');
-    printJobManager.startPolling(eventId, pollInterval);
-    logger.info(`Auto-polling started for event ${eventId || 'all events'} with ${pollInterval}ms interval`);
+    printJobManager.startPolling(eventId, pollInterval).catch(err => logger.error('Auto-polling failed to start:', err));
+    logger.info(`Auto-polling started for event ${eventId} with ${pollInterval}ms interval`);
+  } else {
+    logger.info('Auto-polling disabled or EVENT_ID not set. Polling will start only when requested with an event ID.');
   }
 });
 

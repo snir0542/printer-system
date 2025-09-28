@@ -220,3 +220,22 @@ export const testPrinter = async () => {
   const response: AxiosResponse<{ success: boolean; message?: string }> = await api.post('/print/test');
   return response.data;
 };
+
+/**
+ * Start server-side polling job for a specific event
+ */
+export const startServerPolling = async (eventId: string, intervalMs?: number) => {
+  if (!eventId) throw new Error('Event ID is required');
+  const payload: Record<string, any> = { eventId };
+  if (intervalMs && Number.isFinite(intervalMs)) payload.interval = intervalMs;
+  const response = await api.post('/polling/start', payload);
+  return response.data as { message: string; eventId: string; interval: string };
+};
+
+/**
+ * Stop server-side polling job
+ */
+export const stopServerPolling = async () => {
+  const response = await api.post('/polling/stop');
+  return response.data as { message: string };
+};

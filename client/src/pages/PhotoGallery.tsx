@@ -3,7 +3,7 @@ import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAppDispatch } from '../hooks/useAppDispatch';
 import { useAppSelector } from '../hooks/useAppSelector';
-import { setEventId, setStatus, selectEventId, selectStatus } from '../store/eventSlice';
+import { setEventId, selectEventId, selectStatus } from '../store/eventSlice';
 import {
   Box,
   Grid,
@@ -33,6 +33,7 @@ import {
   batchUpdateStatus,
   type Photo 
 } from '../services/api';
+import { useSnackbar } from 'notistack';
 
 const PhotoGallery = (): JSX.Element => {
   const dispatch = useAppDispatch();
@@ -43,6 +44,7 @@ const PhotoGallery = (): JSX.Element => {
   const navigate = useNavigate();
   const theme: Theme = useTheme();
   const queryClient = useQueryClient();
+  const { enqueueSnackbar } = useSnackbar();
   
   const [selected, setSelected] = useState<string[]>([]);
   const [selectMode, setSelectMode] = useState<boolean>(false);
@@ -74,14 +76,14 @@ const PhotoGallery = (): JSX.Element => {
     }
   }, [urlEventId, reduxEventId, reduxStatus, searchParams, dispatch, navigate]);
 
-  // Fetch photos from API
-  const { data: photos = [], isLoading, refetch } = useQuery({
+  // Fetch photos from API with long-polling
+  const { data: photos = [], isLoading, refetch } = useQuery<Photo[]>({
     queryKey: ['photos', reduxEventId, reduxStatus],
     queryFn: async () => {
       if (!reduxEventId) return [];
       
       try {
-        const data = await fetchPhotosByEvent(
+        const data: Photo[] = await fetchPhotosByEvent(
           reduxEventId, 
           reduxStatus === 'all' ? undefined : reduxStatus as 'pending' | 'printed'
         );
@@ -92,6 +94,9 @@ const PhotoGallery = (): JSX.Element => {
       }
     },
     enabled: !!reduxEventId,
+    // Long polling settings
+    refetchInterval: reduxEventId ? 5000 : false,
+    refetchIntervalInBackground: true,
     // Force refetch when status changes
     refetchOnWindowFocus: false,
     retry: 2,
@@ -180,19 +185,31 @@ const PhotoGallery = (): JSX.Element => {
 
   const handlePrintSelected = async (): Promise<void> => {
     try {
+      if (selected.length === 0) {
+        enqueueSnackbar('No photos selected', { variant: 'warning' });
+        return;
+      }
+
+      enqueueSnackbar(`Printing ${selected.length} photo(s)...`, { variant: 'info' });
+
       // Print each selected photo
       for (const photoId of selected) {
         await printMutation.mutateAsync(photoId);
       }
+
       // Mark all as printed
       await batchUpdateStatusMutation.mutateAsync({ 
         ids: selected, 
         status: 'printed' 
       });
+
+      enqueueSnackbar('Selected photos sent to printer and marked as printed', { variant: 'success' });
+
       setSelected([]);
       await refetch();
     } catch (error) {
       console.error('Error printing photos:', error);
+      enqueueSnackbar('Failed to print selected photos', { variant: 'error' });
     }
   };
 
@@ -232,7 +249,14 @@ const PhotoGallery = (): JSX.Element => {
     );
   }
 
-  if (photos.length === 0) {
+  // Sort photos by newest first
+  const sortedPhotos = (photos || []).slice().sort((a: Photo, b: Photo) => {
+    const aTime = new Date(a.createdAt as any).getTime();
+    const bTime = new Date(b.createdAt as any).getTime();
+    return bTime - aTime;
+  });
+
+  if (sortedPhotos.length === 0) {
     return (
       <Box textAlign="center" mt={4}>
         <Typography variant="h6" color="text.secondary">
@@ -369,7 +393,7 @@ const PhotoGallery = (): JSX.Element => {
       </Box>
 
       <Grid container spacing={2}>
-        {photos.map((photo: Photo) => (
+        {sortedPhotos.map((photo: Photo) => (
           <Grid item xs={12} sm={6} md={4} lg={3} key={photo._id}>
             <Paper
               elevation={3}

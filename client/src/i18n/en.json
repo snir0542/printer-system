@@ -23,6 +23,13 @@
     "testButton": "Test Printer",
     "noPrinter": "No printer connected"
   },
+  "polling": {
+    "start": "Start Polling",
+    "stop": "Stop Polling",
+    "started": "Polling started for event",
+    "stopped": "Polling stopped",
+    "missingEvent": "Please enter an Event ID first"
+  },
   "common": {
     "language": "Language",
     "he": "Hebrew",

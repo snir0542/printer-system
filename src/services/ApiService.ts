@@ -22,40 +22,73 @@ export class ApiService {
       throw new Error('Event ID is required');
     }
 
-    try {
-      // Use the correct endpoint with status filtering
-      const response = await axios.get(`${this.adminPanelURL}/api/photos/event/${eventId}`, {
-        headers: {
-          'x-api-key': this.adminApiKey,
-          'Accept': 'application/json'
+    const headers = {
+      'x-api-key': this.adminApiKey,
+      'Accept': 'application/json'
+    } as const;
+
+    // Helper to normalize photos array from various response shapes
+    const normalize = (rawPhotos: any[]): Photo[] => {
+      return (rawPhotos || []).map((p: any) => ({
+        _id: p._id || p.id,
+        eventId: p.eventId || p.event || eventId,
+        imageData: p.imageData || p.originalUrl || p.url || p.imageUrl,
+        originalUrl: p.originalUrl || p.url || p.imageUrl,
+        status: p.status || p.printStatus || 'pending',
+        printStatus: p.printStatus || p.status || 'pending',
+        createdAt: p.createdAt ? new Date(p.createdAt) : new Date(),
+        updatedAt: p.updatedAt ? new Date(p.updatedAt) : new Date(),
+        metadata: {
+          width: p.metadata?.width || p.width || 0,
+          height: p.metadata?.height || p.height || 0,
+          format: p.metadata?.format || p.format || 'jpeg',
+          size: p.metadata?.size || p.size || 0,
         },
-        params: {
-          status,
-          limit
-        }
+      }));
+    };
+
+    try {
+      // Primary endpoint: /api/photos/event/:eventId
+      const primary = await axios.get(`${this.adminPanelURL}/api/photos/event/${eventId}`, {
+        headers,
+        params: { status, limit },
       });
 
-      // Transform the response to match our expected format
-      const photos = response.data.photos.map((photo: any) => ({
-        ...photo,
-        imageData: photo.originalUrl,
-        originalUrl: photo.originalUrl || photo.url,
-        printStatus: photo.printStatus || 'pending',
-        metadata: {
-          width: photo.metadata?.width || 500,
-          height: photo.metadata?.height || 500,
-          format: photo.metadata?.format || 'jpeg',
-          size: photo.metadata?.size || 500
-        }
-      }));
-
+      const data = primary.data;
+      const photosArr = data?.photos || data?.data || [];
+      const photos = normalize(photosArr);
       return {
         photos,
-        count: response.data.totalCount || photos.length
+        count: data?.totalCount || data?.count || photos.length,
       };
-    } catch (error) {
-      logger.error('Failed to fetch pending photos:', error);
-      throw new Error('Failed to fetch pending photos from server');
+    } catch (errPrimary: any) {
+      // If 404 or path mismatch, try fallback shape: /api/photos?eventId=&status=&limit=
+      const statusCode = errPrimary?.response?.status;
+      const details = errPrimary?.response?.data;
+      logger.warn('Primary fetch pending photos failed', { statusCode, details });
+
+      try {
+        const fallback = await axios.get(`${this.adminPanelURL}/api/photos`, {
+          headers,
+          params: { eventId, status, limit },
+        });
+        const data = fallback.data;
+        const photosArr = data?.photos || data?.data || data || [];
+        const photos = normalize(Array.isArray(photosArr) ? photosArr : (photosArr.items || []));
+        return {
+          photos,
+          count: data?.totalCount || data?.count || photos.length,
+        };
+      } catch (errFallback: any) {
+        logger.error('Failed to fetch pending photos (fallback also failed)', {
+          primaryStatus: statusCode,
+          primaryData: details,
+          fallbackStatus: errFallback?.response?.status,
+          fallbackData: errFallback?.response?.data,
+        });
+        const message = errFallback?.response?.data?.message || errFallback?.message || 'Unknown error';
+        throw new Error(`Failed to fetch pending photos from server: ${message}`);
+      }
     }
   }
 
@@ -68,29 +101,47 @@ export class ApiService {
         }
       });
 
-      const photo = response.data.data;
+      // Support multiple possible shapes from admin panel
+      const raw = (response.data?.data
+        || response.data?.photo
+        || response.data) as any;
+
+      if (!raw || typeof raw !== 'object') {
+        throw new Error('Invalid photo response shape');
+      }
+
+      const imageUrl = raw.url || raw.imageUrl || raw.originalUrl;
+      if (!imageUrl) {
+        throw new Error('Photo has no URL');
+      }
+
       return {
-        ...photo,
-        imageData: photo.url || photo.imageUrl,
-        originalUrl: photo.originalUrl || photo.url,
-        printStatus: photo.status || 'pending',
+        _id: raw._id || raw.id || String(photoId),
+        eventId: raw.eventId || raw.event || 'unknown',
+        imageData: imageUrl,
+        originalUrl: raw.originalUrl || imageUrl,
+        status: raw.status || raw.printStatus || 'pending',
+        printStatus: raw.printStatus || raw.status || 'pending',
+        createdAt: raw.createdAt ? new Date(raw.createdAt) : new Date(),
+        updatedAt: raw.updatedAt ? new Date(raw.updatedAt) : new Date(),
         metadata: {
-          width: photo.width || 0,
-          height: photo.height || 0,
-          format: photo.format || 'jpeg',
-          size: photo.size || 0
+          width: raw.metadata?.width || raw.width || 0,
+          height: raw.metadata?.height || raw.height || 0,
+          format: raw.metadata?.format || raw.format || 'jpeg',
+          size: raw.metadata?.size || raw.size || 0
         }
-      };
+      } as Photo;
     } catch (error) {
       logger.error(`Failed to fetch photo ${photoId}:`, error);
-      throw new Error(`Failed to fetch photo ${photoId}`);
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      throw new Error(`Failed to fetch photo ${photoId}: ${message}`);
     }
   }
 
   async markPhotoAsPrinted(photoId: string): Promise<void> {
     try {
       await axios.patch(
-        `${this.adminPanelURL}/api/photos/${photoId}/status`,
+        `${this.adminPanelURL}/api/photos/${photoId}/print-status`,
         { status: 'printed' },
         {
           headers: {
@@ -163,7 +214,7 @@ export class ApiService {
   async updatePrintStatus(photoId: string, status: 'pending' | 'printed' | 'failed'): Promise<ApiResponse> {
     try {
       const response = await axios.patch<ApiResponse>(
-        `${this.adminPanelURL}/api/photos/${photoId}/status`,
+        `${this.adminPanelURL}/api/photos/${photoId}/print-status`,
         { status },
         {
           headers: {
