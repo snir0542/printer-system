@@ -29,21 +29,24 @@ export class ApiService {
 
     // Helper to normalize photos array from various response shapes
     const normalize = (rawPhotos: any[]): Photo[] => {
-      return (rawPhotos || []).map((p: any) => ({
+      const arr = Array.isArray(rawPhotos) ? rawPhotos : [];
+      return arr.map((p: any) => ({
         _id: p._id || p.id,
-        eventId: p.eventId || p.event || eventId,
+        eventId: p.eventId || p.event || eventId!,
         imageData: p.imageData || p.originalUrl || p.url || p.imageUrl,
         originalUrl: p.originalUrl || p.url || p.imageUrl,
-        status: p.status || p.printStatus || 'pending',
-        printStatus: p.printStatus || p.status || 'pending',
+        status: (p.status || p.printStatus || 'pending') as Photo['status'],
+        printStatus: (p.printStatus || p.status || 'pending') as Photo['printStatus'],
         createdAt: p.createdAt ? new Date(p.createdAt) : new Date(),
         updatedAt: p.updatedAt ? new Date(p.updatedAt) : new Date(),
         metadata: {
-          width: p.metadata?.width || p.width || 0,
-          height: p.metadata?.height || p.height || 0,
-          format: p.metadata?.format || p.format || 'jpeg',
-          size: p.metadata?.size || p.size || 0,
+          width: p.metadata?.width ?? p.width ?? 0,
+          height: p.metadata?.height ?? p.height ?? 0,
+          format: p.metadata?.format ?? p.format ?? 'jpeg',
+          size: p.metadata?.size ?? p.size ?? 0,
         },
+        cloudUrl: p.cloudUrl,
+        printedAt: p.printedAt ? new Date(p.printedAt) : undefined,
       }));
     };
 
@@ -96,13 +99,13 @@ export class ApiService {
     try {
       // Primary endpoint: /api/photos/event/:eventId
       const primary = await getWithRetry(`${this.adminPanelURL}/api/photos/event/${eventId}`, { status, limit });
-
-      const data = primary.data;
-      const photosArr = data?.photos || data?.data || [];
-      const photos = normalize(photosArr);
+      const body = primary.data;
+      const payload = body?.data ?? body; // unwrap ApiResponse if present
+      const photosSource = payload?.photos ?? (Array.isArray(payload) ? payload : payload?.data) ?? [];
+      const photos = normalize(Array.isArray(photosSource) ? photosSource : (payload?.items || []));
       return {
         photos,
-        count: data?.totalCount || data?.count || photos.length,
+        count: payload?.totalCount || payload?.count || photos.length,
       };
     } catch (errPrimary: any) {
       // If 404 or path mismatch, try fallback shape: /api/photos?eventId=&status=&limit=
@@ -112,12 +115,13 @@ export class ApiService {
 
       try {
         const fallback = await getWithRetry(`${this.adminPanelURL}/api/photos`, { eventId, status, limit });
-        const data = fallback.data;
-        const photosArr = data?.photos || data?.data || data || [];
-        const photos = normalize(Array.isArray(photosArr) ? photosArr : (photosArr.items || []));
+        const body = fallback.data;
+        const payload = body?.data ?? body;
+        const photosSource = payload?.photos ?? (Array.isArray(payload) ? payload : payload?.data) ?? [];
+        const photos = normalize(Array.isArray(photosSource) ? photosSource : (payload?.items || []));
         return {
           photos,
-          count: data?.totalCount || data?.count || photos.length,
+          count: payload?.totalCount || payload?.count || photos.length,
         };
       } catch (errFallback: any) {
         logger.error('Failed to fetch pending photos (fallback also failed)', {

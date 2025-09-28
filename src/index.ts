@@ -84,6 +84,17 @@ app.get('/status', (req, res) => {
   });
 });
 
+// Dedicated queue status endpoint
+app.get('/queue', (req, res) => {
+  try {
+    const queueStatus = printJobManager.getQueueStatus();
+    res.json(queueStatus);
+  } catch (error) {
+    logger.error('Failed to get queue status:', error);
+    res.status(500).json({ error: 'Failed to get queue status' });
+  }
+});
+
 app.post('/print/event/:eventId', async (req, res) => {
   try {
     const { eventId } = req.params;

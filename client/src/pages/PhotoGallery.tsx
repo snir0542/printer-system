@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAppDispatch } from '../hooks/useAppDispatch';
 import { useAppSelector } from '../hooks/useAppSelector';
 import { setEventId, selectEventId, selectStatus } from '../store/eventSlice';
@@ -27,12 +27,12 @@ import {
   HourglassEmpty as HourglassEmptyIcon,
 } from '@mui/icons-material';
 import { 
-  fetchPhotosByEvent, 
   printPhoto, 
   markAsPrinted, 
   batchUpdateStatus,
   type Photo 
 } from '../services/api';
+import { usePhotos } from '../hooks/usePhotos';
 import { useSnackbar } from 'notistack';
 
 const PhotoGallery = (): JSX.Element => {
@@ -76,33 +76,8 @@ const PhotoGallery = (): JSX.Element => {
     }
   }, [urlEventId, reduxEventId, reduxStatus, searchParams, dispatch, navigate]);
 
-  // Fetch photos from API with long-polling
-  const { data: photos = [], isLoading, refetch } = useQuery<Photo[]>({
-    queryKey: ['photos', reduxEventId, reduxStatus],
-    queryFn: async () => {
-      if (!reduxEventId) return [];
-      
-      try {
-        const data: Photo[] = await fetchPhotosByEvent(
-          reduxEventId, 
-          reduxStatus === 'all' ? undefined : reduxStatus as 'pending' | 'printed'
-        );
-        return data || [];
-      } catch (error) {
-        console.error('Error fetching photos:', error);
-        return [];
-      }
-    },
-    enabled: !!reduxEventId,
-    // Long polling settings
-    refetchInterval: reduxEventId ? 5000 : false,
-    refetchIntervalInBackground: true,
-    // Force refetch when status changes
-    refetchOnWindowFocus: false,
-    retry: 2,
-    // Refresh data when the component mounts or when status changes
-    refetchOnMount: true,
-  });
+  // Fetch photos using reusable hook (long-polling + sorting)
+  const { sortedPhotos, isLoading, refetch } = usePhotos(reduxEventId, reduxStatus);
 
   // Refresh data when status changes
   useEffect(() => {
@@ -249,12 +224,7 @@ const PhotoGallery = (): JSX.Element => {
     );
   }
 
-  // Sort photos by newest first
-  const sortedPhotos = (photos || []).slice().sort((a: Photo, b: Photo) => {
-    const aTime = new Date(a.createdAt as any).getTime();
-    const bTime = new Date(b.createdAt as any).getTime();
-    return bTime - aTime;
-  });
+  // sortedPhotos provided by hook
 
   if (sortedPhotos.length === 0) {
     return (

@@ -9,6 +9,10 @@ export class PrintJobManager {
   private printQueue: PrintJob[] = [];
   private isProcessing: boolean = false;
   private pollInterval: NodeJS.Timeout | null = null;
+  private lastEventId: string | undefined;
+  private lastIntervalMs: number = 5000;
+  private consecutive429s: number = 0;
+  private breakerOpenUntil: number | null = null;
 
   constructor(apiService: ApiService, printerService: PrinterService) {
     this.apiService = apiService;
@@ -24,6 +28,8 @@ export class PrintJobManager {
     }
 
     logger.info(`Starting photo polling for event ${eventId} every ${intervalMs}ms`);
+    this.lastEventId = eventId;
+    this.lastIntervalMs = intervalMs;
     
     // Initial fetch
     await this.fetchAndQueuePhotos(eventId);
@@ -31,6 +37,18 @@ export class PrintJobManager {
     // Set up polling
     this.pollInterval = setInterval(async () => {
       try {
+        // Circuit breaker: if open, skip cycles until time has passed
+        if (this.breakerOpenUntil && Date.now() < this.breakerOpenUntil) {
+          const msLeft = this.breakerOpenUntil - Date.now();
+          logger.warn(`Polling paused due to rate limiting. Resumes in ${msLeft}ms`);
+          return;
+        }
+        // Reset breaker if window passed
+        if (this.breakerOpenUntil && Date.now() >= this.breakerOpenUntil) {
+          this.breakerOpenUntil = null;
+          this.consecutive429s = 0;
+          logger.info('Rate limit pause ended. Resuming polling.');
+        }
         await this.fetchAndQueuePhotos(eventId);
         await this.processQueue();
       } catch (error) {
@@ -51,6 +69,8 @@ export class PrintJobManager {
     try {
       // Only fetch pending photos for the print queue
       const response: PendingPhotosResponse = await this.apiService.getPendingPhotos(eventId, 'pending', batchSize);
+      // Success resets 429 streak
+      this.consecutive429s = 0;
       
       if (response.photos.length > 0) {
         logger.info(`Found ${response.photos.length} pending photos`);
@@ -74,7 +94,20 @@ export class PrintJobManager {
         }
       }
     } catch (error) {
+      const message = (error as any)?.message || '';
+      const status = (error as any)?.response?.status;
       logger.error('Failed to fetch pending photos:', error);
+      // Detect 429 and trigger breaker
+      if (status === 429 || /status code 429/i.test(message)) {
+        this.consecutive429s += 1;
+        const threshold = 3;
+        if (this.consecutive429s >= threshold) {
+          const pauseMs = 60_000; // 60s pause
+          this.breakerOpenUntil = Date.now() + pauseMs;
+          this.consecutive429s = 0; // reset counter once breaker opens
+          logger.warn(`Opened rate limit circuit breaker for ${pauseMs}ms after repeated 429s.`);
+        }
+      }
     }
   }
 
@@ -158,11 +191,13 @@ export class PrintJobManager {
     await this.processQueue();
   }
 
-  getQueueStatus(): { queueLength: number; isProcessing: boolean; jobs: PrintJob[] } {
+  getQueueStatus(): { queueLength: number; isProcessing: boolean; jobs: PrintJob[]; breakerOpenUntil: number | null; consecutive429s: number } {
     return {
       queueLength: this.printQueue.length,
       isProcessing: this.isProcessing,
-      jobs: [...this.printQueue]
+      jobs: [...this.printQueue],
+      breakerOpenUntil: this.breakerOpenUntil,
+      consecutive429s: this.consecutive429s,
     };
   }
 
