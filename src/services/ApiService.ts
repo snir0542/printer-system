@@ -47,12 +47,55 @@ export class ApiService {
       }));
     };
 
+    const sleep = (ms: number) => new Promise(res => setTimeout(res, ms));
+
+    // Retry/backoff configuration (with sane caps)
+    const RETRY_MAX_ATTEMPTS = parseInt(process.env.API_RETRY_MAX_ATTEMPTS || '4', 10);
+    const RETRY_BASE_DELAY_MS = parseInt(process.env.API_RETRY_BASE_MS || '500', 10);
+    const RETRY_MAX_DELAY_MS = parseInt(process.env.API_RETRY_MAX_DELAY_MS || '15000', 10); // 15s cap
+
+    // Generic GET with retry on 429/503 (respect Retry-After and add jitter)
+    const getWithRetry = async (url: string, params: Record<string, any>) => {
+      const maxAttempts = RETRY_MAX_ATTEMPTS;
+      let attempt = 0;
+      let lastErr: any = null;
+      while (attempt < maxAttempts) {
+        try {
+          return await axios.get(url, { headers, params });
+        } catch (err: any) {
+          const status = err?.response?.status;
+          if (status === 429 || status === 503) {
+            const retryAfterHeader = err?.response?.headers?.['retry-after'];
+            let retryDelayMs = RETRY_BASE_DELAY_MS * Math.pow(2, attempt); // base backoff
+            if (retryAfterHeader) {
+              const ra = Number(retryAfterHeader);
+              if (!isNaN(ra) && ra > 0) {
+                retryDelayMs = Math.max(retryDelayMs, ra * 1000);
+              }
+            }
+            // add jitter +/- 20%
+            const jitter = Math.floor(retryDelayMs * (Math.random() * 0.4 - 0.2));
+            let delay = retryDelayMs + jitter;
+            // Cap delay to avoid excessively long sleeps
+            if (delay > RETRY_MAX_DELAY_MS) {
+              logger.warn(`Capping retry delay from ${delay}ms to ${RETRY_MAX_DELAY_MS}ms for ${url}`);
+              delay = RETRY_MAX_DELAY_MS;
+            }
+            logger.warn(`Rate limited (${status}) fetching ${url}. Retrying in ${delay}ms (attempt ${attempt + 1}/${maxAttempts})`);
+            await sleep(delay);
+            attempt++;
+            lastErr = err;
+            continue;
+          }
+          throw err;
+        }
+      }
+      throw lastErr || new Error('Unknown error during getWithRetry');
+    };
+
     try {
       // Primary endpoint: /api/photos/event/:eventId
-      const primary = await axios.get(`${this.adminPanelURL}/api/photos/event/${eventId}`, {
-        headers,
-        params: { status, limit },
-      });
+      const primary = await getWithRetry(`${this.adminPanelURL}/api/photos/event/${eventId}`, { status, limit });
 
       const data = primary.data;
       const photosArr = data?.photos || data?.data || [];
@@ -68,10 +111,7 @@ export class ApiService {
       logger.warn('Primary fetch pending photos failed', { statusCode, details });
 
       try {
-        const fallback = await axios.get(`${this.adminPanelURL}/api/photos`, {
-          headers,
-          params: { eventId, status, limit },
-        });
+        const fallback = await getWithRetry(`${this.adminPanelURL}/api/photos`, { eventId, status, limit });
         const data = fallback.data;
         const photosArr = data?.photos || data?.data || data || [];
         const photos = normalize(Array.isArray(photosArr) ? photosArr : (photosArr.items || []));
