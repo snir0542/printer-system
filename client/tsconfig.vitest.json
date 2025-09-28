@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["vitest/globals"],
+    "jsx": "react-jsx",
+    "esModuleInterop": true,
+    "moduleResolution": "node"
+  },
+  "include": ["src/**/*.test.ts", "src/**/*.test.tsx"]
+}

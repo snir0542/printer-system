@@ -48,11 +48,15 @@ app.get('/event/:eventId/photos', async (req, res) => {
     
     // In a real implementation, you would fetch photos from your database here
     // For now, we'll use the mock data from ApiService
-    const response = await apiService.getPendingPhotos(eventId, Number(limit));
+    const response = await apiService.getPendingPhotos(
+      eventId, 
+      status as 'pending' | 'printed' | undefined, 
+      Number(limit)
+    );
     
     res.json({
       success: true,
-      data: response.photos,
+      photos: response.photos,
       count: response.count,
       limit: Number(limit),
       offset: Number(offset)

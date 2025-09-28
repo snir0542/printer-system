@@ -13,25 +13,28 @@ export class ApiService {
     this.adminApiKey = process.env.ADMIN_PANEL_API_KEY || '';
   }
 
-  async getPendingPhotos(eventId?: string, limit: number = 10): Promise<PendingPhotosResponse> {
+  async getPendingPhotos(
+    eventId?: string, 
+    status?: 'pending' | 'printed',
+    limit: number = 10
+  ): Promise<PendingPhotosResponse> {
     if (!eventId) {
       throw new Error('Event ID is required');
     }
 
-    console.log("link",`${this.adminPanelURL}/api/photos/event/${eventId}`);
     try {
+      // Use the correct endpoint with status filtering
       const response = await axios.get(`${this.adminPanelURL}/api/photos/event/${eventId}`, {
         headers: {
           'x-api-key': this.adminApiKey,
           'Accept': 'application/json'
         },
         params: {
-          status: 'printed',
+          status,
           limit
         }
       });
 
-console.log("response",response.data);
       // Transform the response to match our expected format
       const photos = response.data.photos.map((photo: any) => ({
         ...photo,
@@ -39,16 +42,16 @@ console.log("response",response.data);
         originalUrl: photo.originalUrl || photo.url,
         printStatus: photo.printStatus || 'pending',
         metadata: {
-          width: photo.metadata.width || 500,
-          height: photo.metadata.height || 500,
-          format: photo.metadata.format || 'jpeg',
-          size: photo.metadata.size || 500
+          width: photo.metadata?.width || 500,
+          height: photo.metadata?.height || 500,
+          format: photo.metadata?.format || 'jpeg',
+          size: photo.metadata?.size || 500
         }
       }));
 
       return {
         photos,
-        count: response.data.count || photos.length
+        count: response.data.totalCount || photos.length
       };
     } catch (error) {
       logger.error('Failed to fetch pending photos:', error);

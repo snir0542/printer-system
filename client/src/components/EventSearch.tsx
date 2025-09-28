@@ -1,28 +1,36 @@
-import { useState } from 'react';
+import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAppDispatch } from '../hooks/useAppDispatch';
+import { useAppSelector } from '../hooks/useAppSelector';
+import { setEventId, setStatus, selectEventId, selectStatus } from '../store/eventSlice';
 import {
   Box,
   TextField,
   Button,
   Typography,
   Divider,
-  useMediaQuery,
-  useTheme,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  SelectChangeEvent,
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import { useQuery } from '@tanstack/react-query';
 import { getPrinters, testPrinter } from '../services/api';
 import { AxiosError } from 'axios';
+import { useI18n } from '../i18n/I18nProvider';
 
 interface EventSearchProps {
   onClose?: () => void;
 }
 
 export default function EventSearch({ onClose }: EventSearchProps) {
-  const [eventId, setEventId] = useState('');
+  const dispatch = useAppDispatch();
+  const eventId = useAppSelector(selectEventId);
+  const status = useAppSelector(selectStatus);
   const navigate = useNavigate();
-  const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  const { t } = useI18n();
 
   const { data: printersResponse } = useQuery({
     queryKey: ['printers'],
@@ -31,12 +39,31 @@ export default function EventSearch({ onClose }: EventSearchProps) {
   
   const printers = printersResponse?.data || [];
 
+  // Update URL when Redux state changes
+  useEffect(() => {
+    if (eventId) {
+      const params = new URLSearchParams();
+      if (status !== 'all') {
+        params.set('status', status);
+      }
+      navigate(`/event/${eventId}${params.toString() ? `?${params.toString()}` : ''}`);
+    }
+  }, [eventId, status, navigate]);
+
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    if (eventId.trim()) {
-      navigate(`/event/${eventId.trim()}`);
+    const input = (e.currentTarget as HTMLFormElement).elements.namedItem('eventId') as HTMLInputElement;
+    const newEventId = input?.value?.trim();
+    
+    if (newEventId) {
+      dispatch(setEventId(newEventId));
       if (onClose) onClose();
     }
+  };
+
+  const handleStatusChange = (event: SelectChangeEvent) => {
+    const newStatus = event.target.value as 'all' | 'pending' | 'printed';
+    dispatch(setStatus(newStatus));
   };
 
   const handleTestPrint = async (): Promise<void> => {
@@ -56,42 +83,59 @@ export default function EventSearch({ onClose }: EventSearchProps) {
   return (
     <Box sx={{ p: 2, width: '100%', maxWidth: '100%' }}>
       <Typography variant="h6" gutterBottom>
-        Search Event
+        {t('eventSearch.title')}
       </Typography>
       
+      {/* Single form: remove nested forms to avoid MUI Select issues */}
       <Box component="form" onSubmit={handleSearch} sx={{ mb: 3 }}>
-        <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
+        <Box display="flex" gap={2} mb={2}>
+          <FormControl fullWidth>
+            <InputLabel id="status-filter-label">{t('eventSearch.statusLabel')}</InputLabel>
+            <Select
+              labelId="status-filter-label"
+              id="status-filter"
+              value={status}
+              label={t('eventSearch.statusLabel')}
+              onChange={handleStatusChange}
+              sx={{ minWidth: 150 }}
+            >
+              <MenuItem value="all">{t('eventSearch.status.all')}</MenuItem>
+              <MenuItem value="pending">{t('eventSearch.status.pending')}</MenuItem>
+              <MenuItem value="printed">{t('eventSearch.status.printed')}</MenuItem>
+            </Select>
+          </FormControl>
           <TextField
             fullWidth
-            size="small"
-            label="Event ID"
+            name="eventId"
+            label={t('eventSearch.eventIdLabel')}
             variant="outlined"
-            value={eventId}
-            onChange={(e) => setEventId(e.target.value)}
-            placeholder="Enter event ID"
+            defaultValue={eventId}
+            size="small"
+            required
           />
-          <Button
-            type="submit"
-            variant="contained"
-            color="primary"
-            startIcon={<SearchIcon />}
-            sx={{ whiteSpace: 'nowrap' }}
-          >
-            {isMobile ? 'Go' : 'Search'}
-          </Button>
         </Box>
+        <Button
+          fullWidth
+          type="submit"
+          variant="contained"
+          color="primary"
+          startIcon={<SearchIcon />}
+          size="large"
+        >
+          {t('eventSearch.searchBtn')}
+        </Button>
       </Box>
 
       <Divider sx={{ my: 2 }} />
 
       <Typography variant="subtitle2" gutterBottom>
-        Printer Status
+        {t('printer.statusTitle')}
       </Typography>
       
       {printers.length > 0 ? (
         <Box sx={{ mb: 2 }}>
           <Typography variant="body2" color="text.secondary">
-            Connected: {printers[0].name} ({printers[0].status})
+            {t('printer.connected')}: {printers[0].name} ({printers[0].status})
           </Typography>
           <Button
             variant="outlined"
@@ -100,12 +144,12 @@ export default function EventSearch({ onClose }: EventSearchProps) {
             sx={{ mt: 1 }}
             fullWidth
           >
-            Test Printer
+            {t('printer.testButton')}
           </Button>
         </Box>
       ) : (
         <Typography variant="body2" color="error">
-          No printer connected
+          {t('printer.noPrinter')}
         </Typography>
       )}
     </Box>

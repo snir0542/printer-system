@@ -1,6 +1,9 @@
 import { useState, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useAppDispatch } from '../hooks/useAppDispatch';
+import { useAppSelector } from '../hooks/useAppSelector';
+import { setEventId, setStatus, selectEventId, selectStatus } from '../store/eventSlice';
 import {
   Box,
   Grid,
@@ -32,41 +35,138 @@ import {
 } from '../services/api';
 
 const PhotoGallery = (): JSX.Element => {
-  const { eventId } = useParams<{ eventId?: string }>();
+  const dispatch = useAppDispatch();
+  const reduxEventId = useAppSelector(selectEventId);
+  const reduxStatus = useAppSelector(selectStatus);
+  const { eventId: urlEventId } = useParams<{ eventId?: string }>();
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const theme: Theme = useTheme();
   const queryClient = useQueryClient();
   
   const [selected, setSelected] = useState<string[]>([]);
   const [selectMode, setSelectMode] = useState<boolean>(false);
 
+  // Sync URL with Redux state (Redux is source of truth)
+  useEffect(() => {
+    // Ensure eventId in Redux matches URL param
+    if (urlEventId && urlEventId !== reduxEventId) {
+      dispatch(setEventId(urlEventId));
+    }
+
+    const urlStatus = searchParams.get('status') as 'pending' | 'printed' | 'all' | null;
+
+    // If Redux is 'all', remove status param from URL if present
+    if (reduxStatus === 'all') {
+      if (urlStatus !== null) {
+        const params = new URLSearchParams(searchParams);
+        params.delete('status');
+        navigate({ search: params.toString() }, { replace: true });
+      }
+      return;
+    }
+
+    // For 'pending' or 'printed', make sure URL reflects Redux
+    if (urlStatus !== reduxStatus) {
+      const params = new URLSearchParams(searchParams);
+      params.set('status', reduxStatus);
+      navigate({ search: params.toString() }, { replace: true });
+    }
+  }, [urlEventId, reduxEventId, reduxStatus, searchParams, dispatch, navigate]);
+
   // Fetch photos from API
   const { data: photos = [], isLoading, refetch } = useQuery({
-    queryKey: ['photos', eventId],
-    queryFn: () => fetchPhotosByEvent(eventId, 'pending'),
-    enabled: !!eventId,
+    queryKey: ['photos', reduxEventId, reduxStatus],
+    queryFn: async () => {
+      if (!reduxEventId) return [];
+      
+      try {
+        const data = await fetchPhotosByEvent(
+          reduxEventId, 
+          reduxStatus === 'all' ? undefined : reduxStatus as 'pending' | 'printed'
+        );
+        return data || [];
+      } catch (error) {
+        console.error('Error fetching photos:', error);
+        return [];
+      }
+    },
+    enabled: !!reduxEventId,
+    // Force refetch when status changes
+    refetchOnWindowFocus: false,
+    retry: 2,
+    // Refresh data when the component mounts or when status changes
+    refetchOnMount: true,
   });
 
+  // Refresh data when status changes
+  useEffect(() => {
+    if (reduxEventId) {
+      refetch();
+    }
+  }, [reduxStatus, refetch, reduxEventId]);
+
   const printMutation = useMutation({
-    mutationFn: printPhoto,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['photos', eventId] });
+    mutationFn: async (photoId: string) => {
+      if (!reduxEventId) throw new Error('No event ID');
+      const result = await printPhoto(photoId);
+      return { ...result, photoId };
+    },
+    onSuccess: (data) => {
+      if (data.success) {
+        // Update the photo status in the cache
+        queryClient.setQueryData<Photo[]>(
+          ['photos', reduxEventId, reduxStatus],
+          (oldData) =>
+            oldData?.map((photo) =>
+              photo._id === (data as any).photoId ? { ...photo, printStatus: 'printed' } : photo
+            ) || []
+        );
+      }
     },
   });
 
   const markAsPrintedMutation = useMutation({
-    mutationFn: (photoId: string) => markAsPrinted(photoId).then(() => ({ photoId })),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['photos', eventId] });
+    mutationFn: async (photoId: string) => {
+      if (!reduxEventId) throw new Error('No event ID');
+      const result = await markAsPrinted(photoId);
+      return { ...result, photoId };
+    },
+    onSuccess: (data) => {
+      if (data.success) {
+        // Update the photo status in the cache
+        queryClient.setQueryData<Photo[]>(
+          ['photos', reduxEventId, reduxStatus],
+          (oldData) =>
+            oldData?.map((photo) =>
+              photo._id === (data as any).photoId ? { ...photo, printStatus: 'printed' } : photo
+            ) || []
+        );
+      }
     },
   });
 
   const batchUpdateStatusMutation = useMutation({
-    mutationFn: ({ ids, status }: { ids: string[]; status: 'printed' | 'pending' }) => 
-      batchUpdateStatus(ids, status),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['photos', eventId] });
-      setSelected([]);
-      setSelectMode(false);
+    mutationFn: async ({ ids, status: newStatus }: { ids: string[]; status: 'printed' | 'pending' }) => {
+      if (!reduxEventId) throw new Error('No event ID');
+      const result = await batchUpdateStatus(ids, newStatus);
+      return { ...result, ids, status: newStatus };
+    },
+    onSuccess: (data) => {
+      if (data.success) {
+        // Update the photos status in the cache
+        queryClient.setQueryData<Photo[]>(
+          ['photos', reduxEventId, reduxStatus],
+          (oldData) =>
+            oldData?.map((photo) =>
+              (data as any).ids.includes(photo._id) 
+                ? { ...photo, printStatus: (data as any).status } 
+                : photo
+            ) || []
+        );
+        setSelected([]);
+        setSelectMode(false);
+      }
     },
   });
 
@@ -105,12 +205,14 @@ const PhotoGallery = (): JSX.Element => {
     }
   };
 
-  // Reset selection when changing events
+  // Reset selection when changing events or status
   useEffect(() => {
     setSelected([]);
     setSelectMode(false);
-    refetch();
-  }, [eventId, refetch]);
+    if (reduxEventId) {
+      refetch();
+    }
+  }, [reduxEventId, reduxStatus, refetch]);
 
   if (isLoading) {
     return (
@@ -120,7 +222,7 @@ const PhotoGallery = (): JSX.Element => {
     );
   }
 
-  if (!eventId) {
+  if (!reduxEventId) {
     return (
       <Box textAlign="center" mt={4}>
         <Typography variant="h6" color="text.secondary">
@@ -217,7 +319,7 @@ const PhotoGallery = (): JSX.Element => {
     <Box>
       <Box sx={headerSx}>
         <Typography variant="h5">
-          {eventId ? `Photos for Event: ${eventId}` : 'All Photos'}
+          {reduxEventId ? `Photos for Event: ${reduxEventId}` : 'All Photos'}
         </Typography>
         <Box>
           {selectMode ? (

@@ -1,0 +1,31 @@
+{
+  "app": {
+    "title": "Photo Printer System"
+  },
+  "eventSearch": {
+    "title": "Search Event",
+    "statusLabel": "Status",
+    "status": {
+      "all": "All",
+      "pending": "Pending",
+      "printed": "Printed"
+    },
+    "eventIdLabel": "Event ID",
+    "searchBtn": "Search"
+  },
+  "gallery": {
+    "noPhotos": "No photos to display",
+    "loadMore": "Load more"
+  },
+  "printer": {
+    "statusTitle": "Printer Status",
+    "connected": "Connected",
+    "testButton": "Test Printer",
+    "noPrinter": "No printer connected"
+  },
+  "common": {
+    "language": "Language",
+    "he": "Hebrew",
+    "en": "English"
+  }
+}

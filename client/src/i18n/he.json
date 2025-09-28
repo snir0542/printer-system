@@ -1,0 +1,31 @@
+{
+  "app": {
+    "title": "מערכת הדפסת תמונות"
+  },
+  "eventSearch": {
+    "title": "חיפוש אירוע",
+    "statusLabel": "סטטוס",
+    "status": {
+      "all": "הכל",
+      "pending": "ממתין להדפסה",
+      "printed": "הודפס"
+    },
+    "eventIdLabel": "מזהה אירוע",
+    "searchBtn": "חפש"
+  },
+  "gallery": {
+    "noPhotos": "אין תמונות להצגה",
+    "loadMore": "טען עוד"
+  },
+  "printer": {
+    "statusTitle": "סטטוס מדפסת",
+    "connected": "מחובר",
+    "testButton": "בדיקת מדפסת",
+    "noPrinter": "אין מדפסת מחוברת"
+  },
+  "common": {
+    "language": "שפה",
+    "he": "עברית",
+    "en": "אנגלית"
+  }
+}

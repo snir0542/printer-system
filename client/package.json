@@ -10,33 +10,48 @@
     "start": "vite preview --port 3002",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "type-check": "tsc --noEmit",
-    "postinstall": "vite --version"
+    "postinstall": "vite --version",
+    "test": "vitest",
+    "test:watch": "vitest watch",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@emotion/react": "^11.11.3",
     "@emotion/styled": "^11.11.0",
     "@mui/icons-material": "^5.15.6",
     "@mui/material": "^5.15.6",
+    "@reduxjs/toolkit": "^2.9.0",
     "@tanstack/react-query": "^5.13.5",
     "axios": "^1.6.7",
     "notistack": "^3.0.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "react-redux": "^9.2.0",
     "react-router-dom": "^6.21.1"
   },
   "devDependencies": {
     "@emotion/babel-plugin": "^11.13.5",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/jest-dom": "^6.8.0",
+    "@testing-library/react": "^16.3.0",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/jsdom": "^21.1.7",
     "@types/node": "^20.19.17",
     "@types/react": "^18.2.45",
     "@types/react-dom": "^18.2.18",
+    "@types/testing-library__jest-dom": "^6.0.0",
+    "@types/testing-library__react": "^10.2.0",
     "@typescript-eslint/eslint-plugin": "^6.14.0",
     "@typescript-eslint/parser": "^6.14.0",
     "@vitejs/plugin-react": "^4.2.1",
+    "@vitest/coverage-v8": "^3.2.4",
     "eslint": "^8.55.0",
     "eslint-plugin-react-hooks": "^4.6.0",
     "eslint-plugin-react-refresh": "^0.4.5",
+    "jsdom": "^27.0.0",
     "typescript": "^5.2.2",
     "vite": "^5.0.8",
-    "vite-tsconfig-paths": "^4.3.2"
+    "vite-tsconfig-paths": "^4.3.2",
+    "vitest": "^3.2.4"
   }
 }

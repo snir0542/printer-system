@@ -10,9 +10,14 @@ import {
   useTheme,
   Theme,
   SxProps,
+  FormControl,
+  Select,
+  MenuItem,
+  InputLabel,
 } from '@mui/material';
 import MenuIcon from '@mui/icons-material/Menu';
 import EventSearch from './EventSearch';
+import { useI18n } from '../i18n/I18nProvider';
 
 const drawerWidth = 300;
 
@@ -23,6 +28,7 @@ interface LayoutProps {
 export default function Layout({ children }: LayoutProps) {
   const theme: Theme = useTheme();
   const [mobileOpen, setMobileOpen] = useState<boolean>(false);
+  const { t, locale, setLocale } = useI18n();
 
   const handleDrawerToggle = (): void => {
     setMobileOpen(!mobileOpen);
@@ -75,9 +81,22 @@ export default function Layout({ children }: LayoutProps) {
           >
             <MenuIcon />
           </IconButton>
-          <Typography variant="h6" noWrap component="div">
-            Photo Printer System
+          <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
+            {t('app.title')}
           </Typography>
+          <FormControl size="small" sx={{ minWidth: 120 }}>
+            <InputLabel id="lang-label">{t('common.language')}</InputLabel>
+            <Select
+              labelId="lang-label"
+              id="lang-select"
+              value={locale}
+              label={t('common.language')}
+              onChange={(e) => setLocale(e.target.value as 'en' | 'he')}
+            >
+              <MenuItem value="he">{t('common.he')}</MenuItem>
+              <MenuItem value="en">{t('common.en')}</MenuItem>
+            </Select>
+          </FormControl>
         </Toolbar>
       </AppBar>
       <Box

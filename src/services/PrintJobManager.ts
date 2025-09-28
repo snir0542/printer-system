@@ -46,8 +46,9 @@ export class PrintJobManager {
 
   private async fetchAndQueuePhotos(eventId?: string, batchSize: number = 5): Promise<void> {
     try {
-      console.log("event id",eventId);
-      const response: PendingPhotosResponse = await this.apiService.getPendingPhotos(eventId, batchSize);
+      console.log("event id", eventId);
+      // Only fetch pending photos for the print queue
+      const response: PendingPhotosResponse = await this.apiService.getPendingPhotos(eventId, 'pending', batchSize);
       
       if (response.photos.length > 0) {
         logger.info(`Found ${response.photos.length} pending photos`);

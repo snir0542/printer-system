@@ -91,17 +91,49 @@ api.interceptors.response.use(
  * Fetch photos by event ID with optional status filter
  */
 
+interface PhotosResponse {
+  photos: Photo[];
+  totalCount: number;
+  hasMore: boolean;
+}
+
 export const fetchPhotosByEvent = async (
   eventId?: string, 
-  status?: 'pending' | 'printed'
+  status?: 'pending' | 'printed' | 'all'
 ): Promise<Photo[]> => {
+  if (!eventId) {
+    console.error('Event ID is required');
+    return [];
+  }
+
   try {
-    const response = await api.get(`/event/${eventId || 'event-1'}/photos`);
-    // The server returns { success: boolean, data: Photo[], count: number }
-    return response.data?.data || [];
+    const response = await api.get<PhotosResponse>(`/event/${eventId}/photos`, {
+      params: { 
+        status: status === 'all' || !status ? undefined : status,
+        _t: Date.now() // Prevent caching
+      }
+    });
+
+    if (!response.data || !Array.isArray(response.data.photos)) {
+      console.error('Invalid response format:', response.data);
+      return [];
+    }
+
+    return response.data.photos.map(photo => ({
+      ...photo,
+      // Ensure consistent format
+      printStatus: photo.printStatus || 'pending',
+      metadata: {
+        width: photo.metadata?.width || 0,
+        height: photo.metadata?.height || 0,
+        format: photo.metadata?.format || 'jpeg',
+        size: photo.metadata?.size || 0,
+        ...photo.metadata
+      }
+    }));
   } catch (error) {
     console.error('Failed to fetch photos:', error);
-    throw error;
+    return [];
   }
 };
 
